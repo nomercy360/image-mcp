@@ -30,7 +30,10 @@ import type { Env } from "./env";
 const RESULT_SHAPE = {
 	url: z.string(),
 	model: z.string(),
+	cost_usd: z.number(),
+	cost_is_estimate: z.boolean(),
 	estimated_cost_usd: z.number(),
+	provider_usage: z.record(z.string(), z.number()).optional(),
 	pricing_note: z.string(),
 	budget: z.record(z.string(), z.union([z.number(), z.string()])).optional(),
 	warnings: z.array(z.string()),
@@ -88,6 +91,7 @@ async function run(env: Env, requestUrl: string, args: RunArgs) {
 		provider: args.provider,
 		model: args.model,
 		req,
+		reveUsdPerCredit: Number(env.REVE_USD_PER_CREDIT ?? "") || undefined,
 	});
 
 	const limit = Number(env.DAILY_BUDGET_USD ?? "5");
@@ -119,21 +123,40 @@ async function run(env: Env, requestUrl: string, args: RunArgs) {
 		throw err;
 	}
 
+	// The reservation used our price table. If the provider reported what it
+	// actually charged, correct the ledger so the cap tracks reality.
+	let spent = reservation.spent_usd;
+	let remaining = reservation.remaining_usd;
+	if (result.actualUsd !== undefined) {
+		const delta = result.actualUsd - sel.estimateUsd;
+		if (Math.abs(delta) > 0.0001) {
+			const trued = await budget.adjust(delta);
+			spent = trued.spent_usd;
+			remaining = Number(Math.max(0, limit - trued.spent_usd).toFixed(4));
+		}
+	}
+
 	const structured = {
 		url: result.url,
 		model: result.model,
+		cost_usd: result.actualUsd ?? result.estimatedUsd,
+		cost_is_estimate: result.actualUsd === undefined,
 		estimated_cost_usd: result.estimatedUsd,
 		pricing_note: PRICING_NOTE,
 		budget: {
-			spent_today_usd: reservation.spent_usd,
+			spent_today_usd: spent,
 			limit_usd: reservation.limit_usd,
-			remaining_usd: reservation.remaining_usd,
+			remaining_usd: remaining,
 		},
+		...(result.usage ? { provider_usage: result.usage } : {}),
 		warnings: result.warnings,
 	} as {
 		url: string;
 		model: string;
+		cost_usd: number;
+		cost_is_estimate: boolean;
 		estimated_cost_usd: number;
+		provider_usage?: Record<string, number>;
 		pricing_note: string;
 		budget: Record<string, number>;
 		warnings: string[];

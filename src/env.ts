@@ -20,6 +20,8 @@ export interface Env {
 	OPENAI_BASE_URL?: string;
 	/** Override api.reve.com — used by the dev egress relay. */
 	REVE_BASE_URL?: string;
+	/** USD per Reve credit. Defaults to the $10 / 7,500-credit pack. */
+	REVE_USD_PER_CREDIT?: string;
 	/** Reve partner API token (direct provider path). */
 	REVE_API_KEY?: string;
 	/** Hard daily spend ceiling in USD, enforced before each call. */

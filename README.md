@@ -13,7 +13,7 @@ same streamable-HTTP endpoint.
 **It returns URLs, not bytes.** Both provider families hand back base64. A
 1024×1024 PNG is ~1.4 MB, ~1.9 MB as base64, roughly 500k tokens if you pass it
 back as text — well past `MAX_MCP_OUTPUT_TOKENS` (25k default). Images are
-persisted to R2 and the tool returns `{url, model, estimated_cost_usd, budget}`.
+persisted to R2 and the tool returns `{url, model, cost_usd, budget}`.
 
 **When the model does need to see the image**, `return_inline: true` returns a
 downscaled WebP through the Images binding, never the original. Token cost is
@@ -35,8 +35,14 @@ descriptions carry arena rankings and per-model strengths, and
 in your system prompt.
 
 **A budget counter, not a prompt.** Agents call image tools in loops. A Durable
-Object tracks daily estimated spend, reserves before each call and refunds on
-failure. Over the cap the tool returns an error instead of an image.
+Object reserves the estimated cost before each call and refunds it if the call
+fails. Over the cap the tool returns an error instead of an image.
+
+Where a provider reports what it actually charged, the ledger is **trued up to
+the real number** — Reve returns `credits_used`, so those calls bill exactly
+(`cost_is_estimate: false`) and the response carries `provider_usage` including
+your remaining credit balance. OpenAI and the gateway models bill against the
+price table, flagged `cost_is_estimate: true`.
 
 **Retries do not double-pay.** Identical requests are cached (gateway `cacheKey`
 for catalog models) for `CACHE_TTL_SECONDS`. Pass `variation` to force a re-roll.
@@ -52,8 +58,8 @@ for catalog models) for `CACHE_TTL_SECONDS`. Pass `variation` to force a re-roll
 | `google/nano-banana-2` | gateway | 4K | 3 refs | 0.045–0.15 | Best all-round default. |
 | `google/nano-banana-2-lite` | gateway | 2K | 3 refs | 0.034 | Cheap Google drafts. |
 | `google/imagen-4` | gateway | 2K | — | 0.02 | Bulk text-to-image. |
-| `reve/v2` | direct | 4K | — | ~0.20 | Layout-first: typography, packaging, posters. |
-| `reve/v1` | direct | 2K | 4 refs | ~0.20 | Reve's editing surface. |
+| `reve/v2` | direct | 4K | — | **0.20** (150 cr) | Layout-first: typography, packaging, posters. Verified 4096×4096. |
+| `reve/v1` | direct | 2K | 4 refs | **0.024** (18 cr) | Cheapest non-draft option here. Reve's editing surface. |
 
 Prices are provider list prices verified July 2026, excluding prompt/input
 tokens. They drive the budget guardrail; they are not invoices.
@@ -69,7 +75,11 @@ Three separate accounts get charged depending on the model:
 - **`openai`** — direct to `api.openai.com` with your own key. Set
   `OPENAI_VIA_GATEWAY=true` to move these onto the gateway instead.
 - **`reve`** — direct to `api.reve.com`. Reve is not in Cloudflare's catalog.
-  v2 costs 150 credits/image (~$0.20 at the $10/7,500 rate).
+  Measured 2026-07-28: `/v1/image/create` = **18 credits ($0.024)**,
+  `/v2/image/create` = **150 credits ($0.20)** — an 8× spread between the two
+  endpoints, so which one you route to matters more than the provider choice.
+  Priced at the $10 / 7,500-credit pack; set `REVE_USD_PER_CREDIT` if yours
+  differs.
 
 Hosting itself is cheap: the Workers Paid plan is $5/mo for 10M requests and 30M
 CPU-ms; Durable Objects with the SQLite backend run on the free plan too. The
@@ -173,19 +183,20 @@ authorization server, and Anthropic does not support pure machine-to-machine
 | `CACHE_TTL_SECONDS` | `300` | Gateway cache TTL / retry-dedupe window. |
 | `AI_GATEWAY_ID` | `default` | AI Gateway name for catalog models. |
 | `OPENAI_VIA_GATEWAY` | — | `"true"` routes OpenAI through Cloudflare instead. |
+| `REVE_USD_PER_CREDIT` | `0.001333` | USD per Reve credit ($10 / 7,500 pack). |
 | `PUBLIC_BASE_URL` | request origin | Origin used to build returned image URLs. |
 
 ## Verified / unverified
 
 Verified live on 2026-07-28: MCP protocol negotiation (2025-11-25), tool
 listing, `generate_image` and `edit_image` end-to-end against
-`gpt-image-1-mini`, R2 persistence, image serving, downscaled WebP previews at
-256/512px with alpha intact, budget reserve/refund, and
-the Reve endpoint schema (probed from its validation errors — its reference docs
-sit behind the API console login).
+`gpt-image-1-mini` and `reve/v1`, R2 persistence, image serving, downscaled WebP
+previews at 256/512px with alpha intact, budget reserve/refund, and the
+credit-accurate true-up (an 18-credit Reve call billed as exactly $0.024).
 
-Not yet exercised: the `gateway` transport (needs a Cloudflare account with
-credits) and the Reve generation response shape (the supplied key had zero
-budget — `PARTNER_API_BUDGET_EXHAUSTED`). The Reve response parser is
-deliberately tolerant of `image` / `b64_json` / `data[].url` shapes and reports
-the payload keys if none match.
+Reve's schema was discovered by probing its validation errors — its reference
+docs sit behind the API console login — then confirmed against live calls.
+
+Not yet exercised: the `gateway` transport, which needs a Cloudflare account
+with credits. Its response shape (`{state, result: {image}}`) comes from
+Cloudflare's published model pages.

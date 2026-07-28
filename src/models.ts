@@ -55,6 +55,13 @@ export type Transport =
 	/** Direct HTTPS to api.reve.com (Reve is not in Cloudflare's catalog). */
 	| "reve";
 
+/**
+ * Reve bills in credits, not dollars. Default rate is the $10 / 7,500-credit
+ * pack; override with REVE_USD_PER_CREDIT if your pack differs.
+ * Observed 2026-07-28: v1 create = 18 credits, v2 create = 150 credits.
+ */
+export const DEFAULT_REVE_USD_PER_CREDIT = 10 / 7500;
+
 export interface ModelSpec {
 	id: string;
 	transport: Transport;
@@ -74,6 +81,8 @@ export interface ModelSpec {
 	/** Independent standing, so routing is not just vibes. */
 	arena: string;
 	notes: string;
+	/** Reve only: exact credit cost per image, priced at the configured rate. */
+	creditsPerImage?: number;
 	buildInput(req: NormalizedRequest, tier?: Tier): Record<string, unknown>;
 	estimateUsd(req: NormalizedRequest, tier?: Tier): number;
 }
@@ -347,12 +356,13 @@ export const MODELS: Record<string, ModelSpec> = {
 		arena:
 			"Reve 2.0 debuted #2 on the Arena behind GPT Image 2 and ahead of Nano Banana 2; 2.1 landed 9 Jul 2026, so independent testing is still thin.",
 		notes:
-			"Direct provider call, billed in Reve credits (separate from Cloudflare). v2 accepts only prompt/version/aspect_ratio — no seed, batch, or reference images. Observed cost: 150 credits/image (~$0.20 at the $10/7500 rate).",
+			"Direct provider call, billed in Reve credits (separate from Cloudflare). Accepts only prompt/version/aspect_ratio — no seed, batch, or reference images. 150 credits/image (~$0.20), and it really does return 4096x4096.",
+		creditsPerImage: 150,
 		buildInput: (r) => ({
 			prompt: r.prompt,
 			aspect_ratio: reveAspect(r.aspect),
 		}),
-		estimateUsd: () => 0.2,
+		estimateUsd: () => 150 * DEFAULT_REVE_USD_PER_CREDIT,
 	},
 	"reve/v1": {
 		id: "reve/v1",
@@ -365,18 +375,19 @@ export const MODELS: Record<string, ModelSpec> = {
 		transparentBackground: false,
 		maxResolution: "2K",
 		bestFor:
-			"Reve's editing surface: /v1/image/edit takes one reference, /v1/image/remix takes several.",
+			"Cheap Reve output at $0.024, and Reve's only editing surface: /v1/image/edit takes one reference, /v1/image/remix takes several.",
 		avoidFor:
-			"Best quality — v2 supersedes it for generation.",
+			"Top-end quality and 4K — v2 supersedes it for generation.",
 		arena:
 			"Superseded by Reve 2.x on the leaderboards.",
 		notes:
-			"Legacy endpoint. Supported versions: reve-create@20250915, reve-create-alpha@20260115. This is the tier that can be materially cheaper than v2 — confirm your per-request credit cost.",
+			"18 credits/image (~$0.024) — the cheapest non-draft option in this catalog, ~8x below v2 and below nano-banana-2. Version reve-create@20250915; reve-create-alpha@20260115 exists but returned FORBIDDEN on a standard partner key.",
+		creditsPerImage: 18,
 		buildInput: (r) => ({
 			prompt: r.prompt,
 			aspect_ratio: reveAspect(r.aspect),
 		}),
-		estimateUsd: () => 0.2,
+		estimateUsd: () => 18 * DEFAULT_REVE_USD_PER_CREDIT,
 	},
 };
 
@@ -420,6 +431,8 @@ export function selectModel(opts: {
 	provider: ProviderPref;
 	model?: string;
 	req: NormalizedRequest;
+	/** Overrides the default Reve credit rate. */
+	reveUsdPerCredit?: number;
 }): Selection {
 	const warnings: string[] = [];
 	const id = opts.model ?? ROUTING[opts.tier][opts.provider];
@@ -461,7 +474,11 @@ export function selectModel(opts: {
 		tier: opts.tier,
 		req,
 		input: model.buildInput(req, opts.tier),
-		estimateUsd: model.estimateUsd(req, opts.tier),
+		estimateUsd:
+			model.creditsPerImage !== undefined
+				? model.creditsPerImage *
+					(opts.reveUsdPerCredit ?? DEFAULT_REVE_USD_PER_CREDIT)
+				: model.estimateUsd(req, opts.tier),
 		warnings,
 	};
 }
@@ -501,6 +518,7 @@ export function catalog() {
 					? m.estimateUsd({ ...BLANK, resolution: "4K" }, m.tier)
 					: null,
 		},
+		credits_per_image: m.creditsPerImage ?? null,
 		notes: m.notes,
 	}));
 }

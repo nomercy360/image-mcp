@@ -8,7 +8,7 @@
  *  - "reve":    direct HTTPS to api.reve.com with your own bearer token.
  */
 
-import type { Selection } from "./models";
+import { DEFAULT_REVE_USD_PER_CREDIT, type Selection } from "./models";
 import type { Env } from "./env";
 
 export interface ImageResult {
@@ -20,6 +20,10 @@ export interface ImageResult {
 	bytes?: number;
 	model: string;
 	estimatedUsd: number;
+	/** What the provider says it charged, when it says so. Beats the estimate. */
+	actualUsd?: number;
+	/** Raw provider accounting, passed through for transparency. */
+	usage?: Record<string, number>;
 	warnings: string[];
 	/** Anything the provider told us that we did not model. */
 	raw?: unknown;
@@ -323,6 +327,22 @@ export async function generate(
 		);
 	}
 
+	// Reve reports exact credit usage; prefer it over our price table.
+	let actualUsd: number | undefined;
+	let usage: Record<string, number> | undefined;
+	const acct = payload as { credits_used?: number; credits_remaining?: number } | null;
+	if (acct && typeof acct.credits_used === "number") {
+		const rate = Number(env.REVE_USD_PER_CREDIT ?? "") || DEFAULT_REVE_USD_PER_CREDIT;
+		actualUsd = acct.credits_used * rate;
+		usage = {
+			credits_used: acct.credits_used,
+			usd_per_credit: rate,
+			...(typeof acct.credits_remaining === "number"
+				? { credits_remaining: acct.credits_remaining }
+				: {}),
+		};
+	}
+
 	const { url, b64 } = extractImage(payload);
 	if (!url && !b64) {
 		throw new Error(
@@ -351,6 +371,8 @@ export async function generate(
 			contentType,
 			model: sel.model.id,
 			estimatedUsd: sel.estimateUsd,
+			actualUsd,
+			usage,
 			warnings,
 		};
 	}
@@ -377,6 +399,8 @@ export async function generate(
 		bytes: body.byteLength,
 		model: sel.model.id,
 		estimatedUsd: sel.estimateUsd,
+		actualUsd,
+		usage,
 		warnings,
 	};
 }

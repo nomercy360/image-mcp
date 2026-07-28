@@ -58,6 +58,21 @@ export class BudgetTracker extends DurableObject {
 		};
 	}
 
+	/**
+	 * True up a reservation once the provider reports what it actually charged.
+	 * Positive delta bills more, negative refunds the difference.
+	 */
+	async adjust(deltaUsd: number) {
+		const s = await this.read();
+		const next: State = {
+			day: s.day,
+			spentUsd: Math.max(0, s.spentUsd + deltaUsd),
+			calls: s.calls,
+		};
+		await this.ctx.storage.put("state", next);
+		return { spent_usd: Number(next.spentUsd.toFixed(4)) };
+	}
+
 	async refund(usd: number) {
 		const s = await this.read();
 		const next: State = {
