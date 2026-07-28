@@ -1,0 +1,5 @@
+# Copy to .dev.vars (gitignored) for local dev.
+MCP_TOKEN="pick-a-long-random-string"
+OPENAI_API_KEY="sk-proj-..."
+REVE_API_KEY="papi.xxxx.yyyy"
+DAILY_BUDGET_USD="5"

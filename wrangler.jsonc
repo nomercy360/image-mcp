@@ -1,0 +1,40 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "image-mcp",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-07-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": { "enabled": true },
+
+	// Workers AI binding. This is also the door to the third-party unified
+	// catalog (google/*, openai/*) — Cloudflare holds those provider keys and
+	// bills your account credits. BYOK is not supported through this binding.
+	"ai": { "binding": "AI" },
+
+	// Where generated images are persisted so the returned URL is stable.
+	// Create it once:  npx wrangler r2 bucket create image-mcp-images
+	"r2_buckets": [
+		{
+			"binding": "IMAGES",
+			"bucket_name": "image-mcp-images",
+			"preview_bucket_name": "image-mcp-images"
+		}
+	],
+
+	// Daily spend counter. SQLite-backed DOs are available on the free plan.
+	"durable_objects": {
+		"bindings": [{ "name": "BUDGET", "class_name": "BudgetTracker" }]
+	},
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["BudgetTracker"] }],
+
+	"vars": {
+		"AI_GATEWAY_ID": "default",
+		"DAILY_BUDGET_USD": "5",
+		"CACHE_TTL_SECONDS": "300"
+	}
+
+	// Secrets (never in this file):
+	//   npx wrangler secret put MCP_TOKEN
+	//   npx wrangler secret put REVE_API_KEY
+	// Locally they come from .dev.vars.
+}

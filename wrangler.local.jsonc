@@ -1,0 +1,30 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	// Evaluation config: identical to wrangler.jsonc but WITHOUT the `ai`
+	// binding, which can only run against Cloudflare's edge and therefore
+	// forces `wrangler dev` into remote mode (and a login) even to boot.
+	//
+	//   npm run dev:local   -> no Cloudflare account needed
+	//   npm run dev         -> full config, requires `wrangler login`
+	//
+	// In this mode the MCP protocol, tool schemas, budget counter, R2 sink and
+	// the Reve direct-provider path all work. google/* and openai/* calls fail
+	// with a clear "AI binding not available" error.
+	"name": "image-mcp-local",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-07-01",
+	"compatibility_flags": ["nodejs_compat"],
+
+	"r2_buckets": [{ "binding": "IMAGES", "bucket_name": "image-mcp-images" }],
+
+	"durable_objects": {
+		"bindings": [{ "name": "BUDGET", "class_name": "BudgetTracker" }]
+	},
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["BudgetTracker"] }],
+
+	"vars": {
+		"AI_GATEWAY_ID": "default",
+		"DAILY_BUDGET_USD": "5",
+		"CACHE_TTL_SECONDS": "300"
+	}
+}

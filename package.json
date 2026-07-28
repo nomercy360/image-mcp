@@ -1,0 +1,28 @@
+{
+  "name": "image-mcp",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types",
+    "dev:local": "wrangler dev -c wrangler.local.jsonc --port 8787",
+    "relay": "node scripts/dev-relay.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260728.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.114.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0-beta.5",
+    "agents": "^0.20.0",
+    "zod": "^4.4.3"
+  },
+  "private": true
+}
