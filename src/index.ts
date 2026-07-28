@@ -40,8 +40,8 @@ export default {
 		const url = new URL(request.url);
 
 		if (url.pathname.startsWith("/i/")) {
-			if (!env.IMAGES) return new Response("No image bucket bound", { status: 404 });
-			const object = await env.IMAGES.get(decodeURIComponent(url.pathname.slice(3)));
+			if (!env.BUCKET) return new Response("No image bucket bound", { status: 404 });
+			const object = await env.BUCKET.get(decodeURIComponent(url.pathname.slice(3)));
 			if (!object) return new Response("Not found", { status: 404 });
 			const headers = new Headers();
 			object.writeHttpMetadata(headers);
@@ -55,7 +55,7 @@ export default {
 				name: "image-mcp",
 				mcp_endpoint: new URL(MCP_ROUTE, url.origin).toString(),
 				auth: env.MCP_TOKEN ? "Authorization: Bearer <MCP_TOKEN>" : "none (MCP_TOKEN unset)",
-				r2: Boolean(env.IMAGES),
+				r2: Boolean(env.BUCKET),
 				reve: Boolean(env.REVE_API_KEY),
 				daily_budget_usd: Number(env.DAILY_BUDGET_USD ?? "5"),
 			});

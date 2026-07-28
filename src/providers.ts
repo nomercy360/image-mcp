@@ -234,11 +234,58 @@ async function persist(
 	requestUrl: string,
 ): Promise<{ url: string; key: string }> {
 	const key = `${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}.${ext}`;
-	await env.IMAGES!.put(key, body, {
+	await env.BUCKET!.put(key, body, {
 		httpMetadata: { contentType, cacheControl: "public, max-age=31536000, immutable" },
 	});
 	const base = env.PUBLIC_BASE_URL?.replace(/\/$/, "") ?? new URL(requestUrl).origin;
 	return { url: `${base}/i/${key}`, key };
+}
+
+/**
+ * Downscaled base64 preview so the model can actually look at the result.
+ *
+ * Cost is quadratic in edge length: an image costs roughly (w*h)/750 tokens,
+ * so 512px is ~350 tokens where the 1024px original is ~1,400 — and ~500,000
+ * if it were handed back as raw base64 text instead of an image block.
+ * Full resolution always stays one fetch away at the returned URL.
+ */
+export async function preview(
+	env: Env,
+	source: { key?: string; url: string },
+	maxPx: number,
+): Promise<{ data: string; mimeType: string } | { error: string }> {
+	if (!env.IMAGES) {
+		return {
+			error:
+				"No Images binding, so the preview could not be downscaled. Add `\"images\": { \"binding\": \"IMAGES\" }` to wrangler.jsonc.",
+		};
+	}
+
+	// Prefer R2 directly — no point round-tripping through our own HTTP route.
+	let body: ReadableStream<Uint8Array> | null = null;
+	if (source.key && env.BUCKET) {
+		body = (await env.BUCKET.get(source.key))?.body ?? null;
+	}
+	if (!body) {
+		const res = await fetch(source.url);
+		if (!res.ok) return { error: `Could not read image for preview (${res.status}).` };
+		body = res.body;
+	}
+	if (!body) return { error: "Image had no body to preview." };
+
+	try {
+		// width alone preserves aspect ratio, and width/height/format are the
+		// options wrangler dev's offline Images mode supports.
+		const out = await env.IMAGES.input(body)
+			.transform({ width: maxPx })
+			// WebP, not JPEG: it keeps alpha (transparent-background images would
+			// otherwise flatten to black) and is smaller at equal quality.
+			.output({ format: "image/webp", quality: 75 });
+		const encoded = await new Response(out.image({ encoding: "base64" })).text();
+		return { data: encoded, mimeType: out.contentType() };
+	} catch (err) {
+		return { error: `Preview transform failed: ${(err as Error).message}` };
+	}
 }
 
 export async function generate(
@@ -290,7 +337,7 @@ export async function generate(
 
 	// No R2 binding: hand back the provider URL untouched (base64 has nowhere
 	// to go, so that combination is a hard error rather than a 2MB token bill).
-	if (!env.IMAGES) {
+	if (!env.BUCKET) {
 		if (!url) {
 			throw new Error(
 				"Provider returned base64 but no R2 bucket is bound. Bind IMAGES in wrangler.jsonc so the bytes have somewhere to live.",

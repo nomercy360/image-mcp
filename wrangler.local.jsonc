@@ -15,7 +15,11 @@
 	"compatibility_date": "2026-07-01",
 	"compatibility_flags": ["nodejs_compat"],
 
-	"r2_buckets": [{ "binding": "IMAGES", "bucket_name": "image-mcp-images" }],
+	"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "image-mcp-images" }],
+
+	// Downscales inline previews. Offline mode in `wrangler dev` covers
+	// width/height/format, which is all this needs.
+	"images": { "binding": "IMAGES" },
 
 	"durable_objects": {
 		"bindings": [{ "name": "BUDGET", "class_name": "BudgetTracker" }]

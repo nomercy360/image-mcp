@@ -15,11 +15,15 @@
 	// Create it once:  npx wrangler r2 bucket create image-mcp-images
 	"r2_buckets": [
 		{
-			"binding": "IMAGES",
+			"binding": "BUCKET",
 			"bucket_name": "image-mcp-images",
 			"preview_bucket_name": "image-mcp-images"
 		}
 	],
+
+	// Downscales inline previews to a few hundred tokens instead of a
+	// full-resolution blob. 5,000 unique transformations/month are free.
+	"images": { "binding": "IMAGES" },
 
 	// Daily spend counter. SQLite-backed DOs are available on the free plan.
 	"durable_objects": {

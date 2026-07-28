@@ -14,7 +14,19 @@ same streamable-HTTP endpoint.
 1024×1024 PNG is ~1.4 MB, ~1.9 MB as base64, roughly 500k tokens if you pass it
 back as text — well past `MAX_MCP_OUTPUT_TOKENS` (25k default). Images are
 persisted to R2 and the tool returns `{url, model, estimated_cost_usd, budget}`.
-Pass `return_inline: true` when Claude actually needs to *look* at the result.
+
+**When the model does need to see the image**, `return_inline: true` returns a
+downscaled WebP through the Images binding, never the original. Token cost is
+quadratic in edge length — roughly `(w×h)/750`:
+
+| `inline_max_px` | WebP | ~image tokens |
+|---|---|---|
+| 256 | ~9 KB | ~87 |
+| 512 (default) | ~26 KB | ~349 |
+| 1024 | — | ~1,400 |
+
+WebP rather than JPEG because it keeps alpha; a transparent-background image
+flattens to black through JPEG. Full resolution stays one fetch away at the URL.
 
 **Three tiers, not one tool per model.** `draft | standard | premium` maps to
 model ids internally. Cost across those tiers varies 40×, so the tool
@@ -115,7 +127,7 @@ in production.
 ## Deploy
 
 ```bash
-npx wrangler r2 bucket create image-mcp-images
+npx wrangler r2 bucket create image-mcp-images   # binding: BUCKET
 npx wrangler secret put MCP_TOKEN        # any long random string
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put REVE_API_KEY
@@ -145,7 +157,7 @@ authorization server, and Anthropic does not support pure machine-to-machine
 
 | Tool | What it does |
 |---|---|
-| `generate_image` | Text → image. `tier`, `provider`, `aspect`, `resolution`, `format`, `transparent`, `variation`, `return_inline`. |
+| `generate_image` | Text → image. `tier`, `provider`, `aspect`, `resolution`, `format`, `transparent`, `variation`, `return_inline`, `inline_max_px`. |
 | `edit_image` | Image(s) + instruction → image. Accepts https URLs or `data:` URIs. |
 | `list_image_models` | Full catalog: cost, ranking, limits, what each model is best and worst at. |
 | `get_image_budget` | Today's spend against the cap. |
@@ -167,7 +179,8 @@ authorization server, and Anthropic does not support pure machine-to-machine
 
 Verified live on 2026-07-28: MCP protocol negotiation (2025-11-25), tool
 listing, `generate_image` and `edit_image` end-to-end against
-`gpt-image-1-mini`, R2 persistence, image serving, budget reserve/refund, and
+`gpt-image-1-mini`, R2 persistence, image serving, downscaled WebP previews at
+256/512px with alpha intact, budget reserve/refund, and
 the Reve endpoint schema (probed from its validation errors — its reference docs
 sit behind the API console login).
 

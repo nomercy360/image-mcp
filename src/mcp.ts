@@ -23,7 +23,7 @@ import {
 	type Resolution,
 	type Tier,
 } from "./models";
-import { generate } from "./providers";
+import { generate, preview } from "./providers";
 import { budgetStub } from "./budget";
 import type { Env } from "./env";
 
@@ -34,6 +34,7 @@ const RESULT_SHAPE = {
 	pricing_note: z.string(),
 	budget: z.record(z.string(), z.union([z.number(), z.string()])).optional(),
 	warnings: z.array(z.string()),
+	preview: z.object({ max_px: z.number(), bytes: z.number() }).optional(),
 };
 
 async function digest(input: string): Promise<string> {
@@ -56,6 +57,7 @@ interface RunArgs {
 	refs: string[];
 	variation?: string;
 	return_inline: boolean;
+	inline_max_px: number;
 }
 
 /** Tool errors must reach the model as text, not as an opaque runtime fault. */
@@ -128,34 +130,46 @@ async function run(env: Env, requestUrl: string, args: RunArgs) {
 			remaining_usd: reservation.remaining_usd,
 		},
 		warnings: result.warnings,
+	} as {
+		url: string;
+		model: string;
+		estimated_cost_usd: number;
+		pricing_note: string;
+		budget: Record<string, number>;
+		warnings: string[];
+		preview?: { max_px: number; bytes: number };
 	};
 
-	const content: Array<
-		{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-	> = [{ type: "text", text: JSON.stringify(structured, null, 2) }];
+	const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
 
-	// Inline bytes are opt-in: a 1024px PNG is ~1.4MB, ~500k tokens as base64,
-	// which blows past MAX_MCP_OUTPUT_TOKENS. The URL is the default payload.
+	// Inline bytes are opt-in and always downscaled — the full-resolution image
+	// stays at the URL. See preview() for the token arithmetic.
 	if (args.return_inline) {
-		const res = await fetch(result.url);
-		const buf = await res.arrayBuffer();
-		if (buf.byteLength > 1_500_000) {
-			structured.warnings.push(
-				`Image is ${(buf.byteLength / 1e6).toFixed(1)}MB — too large to inline; returning the URL only.`,
-			);
+		const shot = await preview(
+			env,
+			{ key: result.key, url: result.url },
+			args.inline_max_px,
+		);
+		if ("error" in shot) {
+			structured.warnings.push(shot.error);
 		} else {
-			let bin = "";
-			const bytes = new Uint8Array(buf);
-			for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-			content.push({
-				type: "image",
-				data: btoa(bin),
-				mimeType: result.contentType,
-			});
+			images.push({ type: "image", data: shot.data, mimeType: shot.mimeType });
+			structured.preview = {
+				max_px: args.inline_max_px,
+				bytes: Math.round(shot.data.length * 0.75),
+			};
 		}
 	}
 
-	return { content, structuredContent: structured };
+	// Serialize last: the preview step adds warnings and metadata, and a text
+	// block built earlier would silently drop them.
+	return {
+		content: [
+			{ type: "text" as const, text: JSON.stringify(structured, null, 2) },
+			...images,
+		],
+		structuredContent: structured,
+	};
 }
 
 export function createServer(env: Env, requestUrl: string): McpServer {
@@ -207,7 +221,16 @@ export function createServer(env: Env, requestUrl: string): McpServer {
 				return_inline: z
 					.boolean()
 					.default(false)
-					.describe("Also return the image bytes so you can look at the result. Expensive — URL only by default."),
+					.describe(
+						"Also return the image itself, downscaled, so you can look at the result and critique it. Costs a few hundred tokens; the full-resolution image is always at the returned URL.",
+					),
+				inline_max_px: z
+					.number()
+					.int()
+					.min(128)
+					.max(1024)
+					.default(512)
+					.describe("Longest edge of the inline preview. Token cost scales with area."),
 			}),
 			outputSchema: z.object(RESULT_SHAPE),
 		},
@@ -240,7 +263,19 @@ export function createServer(env: Env, requestUrl: string): McpServer {
 				format: z.enum(["png", "jpg", "webp"]).default("png"),
 				transparent: z.boolean().default(false),
 				variation: z.string().optional(),
-				return_inline: z.boolean().default(false),
+				return_inline: z
+					.boolean()
+					.default(false)
+					.describe(
+						"Also return the image itself, downscaled, so you can look at the result and critique it. Costs a few hundred tokens; the full-resolution image is always at the returned URL.",
+					),
+				inline_max_px: z
+					.number()
+					.int()
+					.min(128)
+					.max(1024)
+					.default(512)
+					.describe("Longest edge of the inline preview. Token cost scales with area."),
 			}),
 			outputSchema: z.object(RESULT_SHAPE),
 		},

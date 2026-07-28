@@ -2,7 +2,9 @@ export interface Env {
 	/** Workers AI binding — also the door to the third-party unified catalog. */
 	AI: unknown;
 	/** Optional: where generated images are persisted. */
-	IMAGES?: R2Bucket;
+	BUCKET?: R2Bucket;
+	/** Optional: Cloudflare Images, used only to downscale inline previews. */
+	IMAGES?: ImagesBinding;
 	/** Budget counter (Durable Object, SQLite backend). */
 	BUDGET: DurableObjectNamespace;
 
